@@ -1,7 +1,6 @@
 import type { ILogoraOutputOptions, LogLevel } from "logora";
 
-import type { FileRotationPolicy } from "../enums";
-import { FileOutputType } from "../enums";
+import type { FileOutputType, FileRotationPolicy } from "../enums";
 
 /**
  * Base configuration for file outputs.

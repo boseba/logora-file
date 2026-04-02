@@ -1,4 +1,4 @@
-import { FileJsonOutputOptions, FileTextOutputOptions } from "./config";
+import type { FileJsonOutputOptions, FileTextOutputOptions } from "./config";
 import { FileJsonOutput, FileTextOutput } from "./core/output";
 
 export * from "./config";

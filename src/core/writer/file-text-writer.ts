@@ -1,6 +1,6 @@
 import type { ILogoraWriter, LogEntry } from "logora/module";
 
-import { FileTextOutputOptions } from "../../config";
+import type { FileTextOutputOptions } from "../../config";
 import { FileSession } from "../file-session";
 import { FileTextFormatter } from "../formatter/file-text-formatter";
 import { RotationManager } from "../rotation-manager";

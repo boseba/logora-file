@@ -1,4 +1,4 @@
-import { LogEntry } from "logora/module";
+import type { LogEntry } from "logora/module";
 
 /**
  * Formats log events as JSON Lines records.

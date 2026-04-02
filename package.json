@@ -1,6 +1,6 @@
 {
   "name": "logora-file",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A file output plugin for Logora supporting text and JSON log formats.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

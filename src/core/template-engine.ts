@@ -12,8 +12,10 @@ type TemplateValueMap = Record<string, string>;
  * to non-empty values. Otherwise, the whole block is removed.
  */
 export class TemplateEngine {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private static readonly OPTIONAL_BLOCK_REGEX: RegExp = /\{([^{}]*)\}/g;
 
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private static readonly PLACEHOLDER_REGEX: RegExp = /%[a-zA-Z]+%/g;
 
   /**

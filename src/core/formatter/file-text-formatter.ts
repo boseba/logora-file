@@ -1,8 +1,8 @@
 import dayjs from "dayjs";
-import { LogEntry } from "logora/module";
+import type { LogEntry } from "logora/module";
 
 import { LogType } from "logora";
-import { FileTextOutputOptions } from "../../config";
+import type { FileTextOutputOptions } from "../../config";
 import { TemplateEngine } from "../template-engine";
 
 /**
@@ -151,14 +151,23 @@ export class FileTextFormatter {
       return "null";
     }
 
+    if (
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      typeof value === "bigint" ||
+      typeof value === "symbol"
+    ) {
+      return String(value);
+    }
+
     if (typeof value === "object") {
       try {
         return JSON.stringify(value);
       } catch {
-        return String(value);
+        return "[Unserializable Object]";
       }
     }
 
-    return String(value);
+    return "[Unsupported Value]";
   }
 }

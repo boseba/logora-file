@@ -1,6 +1,6 @@
 import type { ILogoraWriter, LogEntry } from "logora/module";
 
-import { FileJsonOutputOptions } from "../../config";
+import type { FileJsonOutputOptions } from "../../config";
 import { FileSession } from "../file-session";
 import { FileJsonFormatter } from "../formatter/file-json-formatter";
 
