@@ -1,6 +1,6 @@
 # logora-file
 
-[!\[NPM version](https://img.shields.io/npm/v/logora-file?style=flat-square)](https://www.npmjs.com/package/logora-file)
+[![NPM version](https://img.shields.io/npm/v/logora-file?style=flat-square)](https://www.npmjs.com/package/logora-file)
 [![Coverage Status](https://coveralls.io/repos/github/boseba/logora-file/badge.svg?branch=main)](https://coveralls.io/github/boseba/logora-file?branch=main)
 
 **logora-file** is the official file output module for the [Logora](https://www.npmjs.com/package/logora) logging framework.
