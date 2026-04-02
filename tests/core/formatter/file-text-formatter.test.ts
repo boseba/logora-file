@@ -111,7 +111,7 @@ describe("FileTextFormatter", () => {
     const circular: Record<string, unknown> = {};
     circular["self"] = circular;
 
-    expect(formatter.stringify(circular)).toContain("[object Object]");
+    expect(formatter.stringify(circular)).toBe("[Unserializable Object]");
   });
 
   it("should stringify primitive values", () => {
