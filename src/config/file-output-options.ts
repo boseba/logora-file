@@ -2,6 +2,8 @@ import type { ILogoraOutputOptions, LogLevel } from "logora";
 
 import type { FileOutputType, FileRotationPolicy } from "../enums";
 
+export type FileBufferOverflowStrategy = "drop-oldest" | "drop-newest";
+
 /**
  * Base configuration for file outputs.
  *
@@ -83,6 +85,37 @@ export abstract class FileOutputOptions implements ILogoraOutputOptions {
    * Older files are deleted.
    */
   public maxAgeDays?: number;
+
+  /**
+   * Maximum number of records written during a single flush cycle.
+   *
+   * Default: 100
+   */
+  public maxBatchSize: number = 100;
+
+  /**
+   * Maximum number of buffered records kept in memory before overflow
+   * handling starts applying.
+   *
+   * Default: 5000
+   */
+  public maxBufferedRecords: number = 5000;
+
+  /**
+   * Strategy applied when the in-memory buffer is full.
+   *
+   * - "drop-oldest": removes the oldest buffered record and keeps the new one
+   * - "drop-newest": ignores the incoming record
+   *
+   * Default: "drop-oldest"
+   */
+  public overflowStrategy: FileBufferOverflowStrategy = "drop-oldest";
+
+  /**
+   * Optional callback invoked when the internal async pipeline encounters
+   * an error or a buffer overflow condition.
+   */
+  public onError?: (error: unknown) => void;
 
   protected constructor(overrides?: Partial<FileOutputOptions>) {
     Object.assign(this, overrides);

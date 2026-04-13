@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { FileTextOutputOptions } from "../../src/config";
 import { FileSession } from "../../src/core/file-session";
+import type { FileWriteRecord } from "../../src/core/pipeline/file-write-record.interface";
 
 describe("FileSession", () => {
   let tempDir: string;
@@ -16,7 +17,7 @@ describe("FileSession", () => {
     }
   });
 
-  it("should append a line to the active file", () => {
+  it("should append a batch to the active file", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -27,12 +28,19 @@ describe("FileSession", () => {
       }),
     );
 
-    session.appendLine("Hello", new Date("2026-03-30T10:00:00.000Z"));
+    const records: FileWriteRecord[] = [
+      {
+        content: "Hello",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+    ];
+
+    await session.appendBatch(records);
 
     expect(fs.readFileSync(filePath, "utf8")).toBe("Hello\n");
   });
 
-  it("should append empty lines", () => {
+  it("should append multiple records in order", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -43,12 +51,27 @@ describe("FileSession", () => {
       }),
     );
 
-    session.appendEmptyLines(2);
+    const records: FileWriteRecord[] = [
+      {
+        content: "Line 1",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+      {
+        content: "",
+        timestamp: new Date("2026-03-30T10:00:01.000Z"),
+      },
+      {
+        content: "Line 2",
+        timestamp: new Date("2026-03-30T10:00:02.000Z"),
+      },
+    ];
 
-    expect(fs.readFileSync(filePath, "utf8")).toBe("\n\n");
+    await session.appendBatch(records);
+
+    expect(fs.readFileSync(filePath, "utf8")).toBe("Line 1\n\nLine 2\n");
   });
 
-  it("should not append empty lines when count is zero", () => {
+  it("should do nothing when appending an empty batch", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -59,82 +82,12 @@ describe("FileSession", () => {
       }),
     );
 
-    session.appendEmptyLines(0);
+    await session.appendBatch([]);
 
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
-  it("should return null header day key when append is false", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const filePath = path.join(tempDir, "app.log");
-
-    fs.writeFileSync(filePath, "Hello\n");
-
-    const session = new FileSession(
-      new FileTextOutputOptions({
-        path: filePath,
-        append: false,
-      }),
-    );
-
-    const result = session.getInitialHeaderDayKey(new Date());
-
-    expect(result).toBeNull();
-  });
-
-  it("should return null header day key when file does not exist", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const filePath = path.join(tempDir, "app.log");
-
-    const session = new FileSession(
-      new FileTextOutputOptions({
-        path: filePath,
-      }),
-    );
-
-    const result = session.getInitialHeaderDayKey(new Date());
-
-    expect(result).toBeNull();
-  });
-
-  it("should return null header day key when file is empty", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const filePath = path.join(tempDir, "app.log");
-
-    fs.writeFileSync(filePath, "");
-
-    const session = new FileSession(
-      new FileTextOutputOptions({
-        path: filePath,
-      }),
-    );
-
-    const result = session.getInitialHeaderDayKey(new Date());
-
-    expect(result).toBeNull();
-  });
-
-  it("should return the current day key when append is enabled and file was modified today", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const filePath = path.join(tempDir, "app.log");
-    const referenceDate = new Date("2026-03-30T10:00:00.000Z");
-
-    fs.writeFileSync(filePath, "Hello\n");
-    fs.utimesSync(filePath, referenceDate, referenceDate);
-
-    const session = new FileSession(
-      new FileTextOutputOptions({
-        path: filePath,
-        append: true,
-      }),
-    );
-
-    const result = session.getInitialHeaderDayKey(referenceDate);
-
-    expect(result).toBe("2026-03-30");
-  });
-
-  it("should rotate on startup when enabled", () => {
+  it("should rotate on startup when enabled", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -147,17 +100,27 @@ describe("FileSession", () => {
       }),
     );
 
-    session.appendLine("New content", new Date("2026-03-30T10:00:00.000Z"));
+    const records: FileWriteRecord[] = [
+      {
+        content: "New content",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+    ];
 
-    const files = fs.readdirSync(tempDir);
+    await session.appendBatch(records);
+
+    const files: string[] = fs.readdirSync(tempDir);
 
     expect(
-      files.some((file) => file.startsWith("app.") && file.endsWith(".log")),
+      files.some(
+        (fileName: string) =>
+          fileName.startsWith("app.") && fileName.endsWith(".log"),
+      ),
     ).toBe(true);
     expect(fs.readFileSync(filePath, "utf8")).toBe("New content\n");
   });
 
-  it("should truncate the active file when append is false", () => {
+  it("should truncate the active file when append is false", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -170,12 +133,19 @@ describe("FileSession", () => {
       }),
     );
 
-    session.appendLine("New content", new Date("2026-03-30T10:00:00.000Z"));
+    const records: FileWriteRecord[] = [
+      {
+        content: "New content",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+    ];
+
+    await session.appendBatch(records);
 
     expect(fs.readFileSync(filePath, "utf8")).toBe("New content\n");
   });
 
-  it("should rotate on size when enabled", () => {
+  it("should rotate on size when enabled", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -189,12 +159,22 @@ describe("FileSession", () => {
       }),
     );
 
-    session.appendLine("A", new Date("2026-03-30T10:00:00.000Z"));
+    const records: FileWriteRecord[] = [
+      {
+        content: "A",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+    ];
 
-    const files = fs.readdirSync(tempDir);
+    await session.appendBatch(records);
+
+    const files: string[] = fs.readdirSync(tempDir);
 
     expect(
-      files.some((file) => file.startsWith("app.") && file.endsWith(".log")),
+      files.some(
+        (fileName: string) =>
+          fileName.startsWith("app.") && fileName.endsWith(".log"),
+      ),
     ).toBe(true);
     expect(fs.readFileSync(filePath, "utf8")).toBe("A\n");
   });
@@ -204,7 +184,7 @@ describe("FileSession", () => {
     const filePath = path.join(tempDir, "app.log");
 
     expect(() => {
-      new FileSession(
+      return new FileSession(
         new FileTextOutputOptions({
           path: filePath,
           rotation: ["size"],
@@ -213,30 +193,7 @@ describe("FileSession", () => {
     }).toThrow("File size rotation requires a positive maxSizeBytes value.");
   });
 
-  it("should return null header day key when file was not modified on the same day", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const filePath = path.join(tempDir, "app.log");
-
-    fs.writeFileSync(filePath, "Hello\n");
-
-    const fileDate = new Date(2026, 2, 29, 10, 0, 0, 0);
-    const referenceDate = new Date(2026, 2, 30, 10, 0, 0, 0);
-
-    fs.utimesSync(filePath, fileDate, fileDate);
-
-    const session = new FileSession(
-      new FileTextOutputOptions({
-        path: filePath,
-        append: true,
-      }),
-    );
-
-    const result = session.getInitialHeaderDayKey(referenceDate);
-
-    expect(result).toBeNull();
-  });
-
-  it("should not fail when rotating a non-existing file", () => {
+  it("should not fail when the target file does not exist", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -247,12 +204,18 @@ describe("FileSession", () => {
       }),
     );
 
-    expect(() => {
-      (session as unknown as { _rotate(date: Date): void })._rotate(new Date());
-    }).not.toThrow();
+    const records: FileWriteRecord[] = [
+      {
+        content: "Hello",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+    ];
+
+    await expect(session.appendBatch(records)).resolves.toBeUndefined();
+    expect(fs.readFileSync(filePath, "utf8")).toBe("Hello\n");
   });
 
-  it("should not rotate an empty file", () => {
+  it("should not rotate an empty file", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
 
@@ -261,43 +224,53 @@ describe("FileSession", () => {
     const session = new FileSession(
       new FileTextOutputOptions({
         path: filePath,
-        rotation: ["daily"],
+        rotation: ["startup"],
       }),
     );
 
-    expect(() => {
-      (session as unknown as { _rotate(date: Date): void })._rotate(new Date());
-    }).not.toThrow();
+    const records: FileWriteRecord[] = [
+      {
+        content: "Hello",
+        timestamp: new Date("2026-03-30T10:00:00.000Z"),
+      },
+    ];
+
+    await session.appendBatch(records);
 
     expect(fs.existsSync(filePath)).toBe(true);
+    expect(fs.readFileSync(filePath, "utf8")).toBe("Hello\n");
   });
 
-  it("should create a unique rotated file name when a collision exists", () => {
+  it("should create a unique rotated file name when a collision exists", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
     const filePath = path.join(tempDir, "app.log");
     const rotationDate = new Date(2026, 2, 30, 10, 0, 0, 0);
 
     fs.writeFileSync(filePath, "active");
 
-    const session = new FileSession(
-      new FileTextOutputOptions({
-        path: filePath,
-        rotation: ["startup"],
-      }),
-    );
-
     const suffix = "2026-03-30_10-00-00-000";
     fs.writeFileSync(path.join(tempDir, `app.${suffix}.log`), "existing");
 
-    expect(() => {
-      (session as unknown as { _rotate(date: Date): void })._rotate(
-        rotationDate,
-      );
-    }).not.toThrow();
+    const session = new FileSession(
+      new FileTextOutputOptions({
+        path: filePath,
+        rotation: ["size"],
+        maxSizeBytes: 6,
+      }),
+    );
 
-    const files = fs.readdirSync(tempDir);
+    const records: FileWriteRecord[] = [
+      {
+        content: "next",
+        timestamp: rotationDate,
+      },
+    ];
+
+    await session.appendBatch(records);
+
+    const files: string[] = fs.readdirSync(tempDir);
 
     expect(files).toContain(`app.${suffix}.log`);
-    expect(files.some((file) => file === `app.${suffix}.1.log`)).toBe(true);
+    expect(files).toContain(`app.${suffix}.1.log`);
   });
 });

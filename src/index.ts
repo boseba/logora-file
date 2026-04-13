@@ -3,6 +3,7 @@ import { FileJsonOutput, FileTextOutput } from "./core/output";
 
 export * from "./config";
 export * from "./enums";
+export * from "./models";
 
 /**
  * Creates a new text file output transport for Logora.

@@ -1,25 +1,30 @@
 import { describe, expect, it } from "vitest";
 
+import { FileJsonOutputOptions, FileTextOutputOptions } from "../../src/config";
 import { FileJsonOutput, FileTextOutput } from "../../src/core/output";
 
-describe("FileTextOutput", () => {
-  it("should create a FileTextOutput instance", () => {
-    const output = new FileTextOutput();
+describe("File outputs", () => {
+  it("should create a FileTextOutput", () => {
+    const output = new FileTextOutput(
+      new FileTextOutputOptions({
+        path: "./logs/app.log",
+      }),
+    );
 
     expect(output.name).toBe("file-text");
-    expect(output.options).toBeDefined();
-    expect(output.writer).toBeDefined();
-    expect(output.options.type).toBe("text");
+    expect(output.options).toBeInstanceOf(FileTextOutputOptions);
+    expect(typeof output.writer.log).toBe("function");
   });
-});
 
-describe("FileJsonOutput", () => {
-  it("should create a FileJsonOutput instance", () => {
-    const output = new FileJsonOutput();
+  it("should create a FileJsonOutput", () => {
+    const output = new FileJsonOutput(
+      new FileJsonOutputOptions({
+        path: "./logs/app.jsonl",
+      }),
+    );
 
     expect(output.name).toBe("file-json");
-    expect(output.options).toBeDefined();
-    expect(output.writer).toBeDefined();
-    expect(output.options.type).toBe("json");
+    expect(output.options).toBeInstanceOf(FileJsonOutputOptions);
+    expect(typeof output.writer.log).toBe("function");
   });
 });

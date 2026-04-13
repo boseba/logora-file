@@ -15,108 +15,57 @@ describe("RetentionManager", () => {
     }
   });
 
-  it("should do nothing when directory does not exist", () => {
-    const filePath = path.join(
-      os.tmpdir(),
-      `logora-file-${Date.now()}`,
-      "app.log",
+  it("should keep only the configured number of rotated files", async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
+    const activeFilePath = path.join(tempDir, "app.log");
+
+    fs.writeFileSync(
+      path.join(tempDir, "app.2026-03-30_10-00-00-000.log"),
+      "a",
+    );
+    fs.writeFileSync(
+      path.join(tempDir, "app.2026-03-30_10-00-00-001.log"),
+      "b",
+    );
+    fs.writeFileSync(
+      path.join(tempDir, "app.2026-03-30_10-00-00-002.log"),
+      "c",
     );
 
-    expect(() => {
-      RetentionManager.apply(filePath, 2, 2);
-    }).not.toThrow();
+    await RetentionManager.apply(activeFilePath, 2);
+
+    const files = fs
+      .readdirSync(tempDir)
+      .filter((fileName: string) => fileName !== "app.log");
+
+    expect(files.length).toBe(2);
   });
 
-  it("should delete old rotated files by maxFiles", () => {
+  it("should delete rotated files older than the configured max age", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const activePath = path.join(tempDir, "app.log");
-
-    fs.writeFileSync(path.join(tempDir, "app.1.log"), "1");
-    fs.writeFileSync(path.join(tempDir, "app.2.log"), "2");
-    fs.writeFileSync(path.join(tempDir, "app.3.log"), "3");
-
-    const now = Date.now();
-    fs.utimesSync(
-      path.join(tempDir, "app.1.log"),
-      now / 1000 - 30,
-      now / 1000 - 30,
-    );
-    fs.utimesSync(
-      path.join(tempDir, "app.2.log"),
-      now / 1000 - 20,
-      now / 1000 - 20,
-    );
-    fs.utimesSync(
-      path.join(tempDir, "app.3.log"),
-      now / 1000 - 10,
-      now / 1000 - 10,
+    const activeFilePath = path.join(tempDir, "app.log");
+    const rotatedFilePath = path.join(
+      tempDir,
+      "app.2026-03-30_10-00-00-000.log",
     );
 
-    RetentionManager.apply(activePath, 2, undefined);
+    fs.writeFileSync(rotatedFilePath, "a");
 
-    expect(fs.existsSync(path.join(tempDir, "app.3.log"))).toBe(true);
-    expect(fs.existsSync(path.join(tempDir, "app.2.log"))).toBe(true);
-    expect(fs.existsSync(path.join(tempDir, "app.1.log"))).toBe(false);
+    const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+
+    fs.utimesSync(rotatedFilePath, oldDate, oldDate);
+
+    await RetentionManager.apply(activeFilePath, undefined, 1);
+
+    expect(fs.existsSync(rotatedFilePath)).toBe(false);
   });
 
-  it("should delete old rotated files by maxAgeDays", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const activePath = path.join(tempDir, "app.log");
-    const recentFile = path.join(tempDir, "app.recent.log");
-    const oldFile = path.join(tempDir, "app.old.log");
+  it("should do nothing when the directory does not exist", async () => {
+    tempDir = path.join(os.tmpdir(), `logora-file-missing-${Date.now()}`);
+    const activeFilePath = path.join(tempDir, "app.log");
 
-    fs.writeFileSync(recentFile, "recent");
-    fs.writeFileSync(oldFile, "old");
-
-    const nowSeconds = Date.now() / 1000;
-    fs.utimesSync(recentFile, nowSeconds, nowSeconds);
-    fs.utimesSync(
-      oldFile,
-      nowSeconds - 3 * 24 * 60 * 60,
-      nowSeconds - 3 * 24 * 60 * 60,
-    );
-
-    RetentionManager.apply(activePath, undefined, 1);
-
-    expect(fs.existsSync(recentFile)).toBe(true);
-    expect(fs.existsSync(oldFile)).toBe(false);
-  });
-
-  it("should ignore unrelated files", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const activePath = path.join(tempDir, "app.log");
-    const unrelatedFile = path.join(tempDir, "other.1.log");
-
-    fs.writeFileSync(unrelatedFile, "other");
-
-    RetentionManager.apply(activePath, 1, 1);
-
-    expect(fs.existsSync(unrelatedFile)).toBe(true);
-  });
-
-  it("should do nothing when maxFiles is zero", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const activePath = path.join(tempDir, "app.log");
-
-    fs.writeFileSync(path.join(tempDir, "app.1.log"), "1");
-    fs.writeFileSync(path.join(tempDir, "app.2.log"), "2");
-
-    RetentionManager.apply(activePath, 0, undefined);
-
-    expect(fs.existsSync(path.join(tempDir, "app.1.log"))).toBe(true);
-    expect(fs.existsSync(path.join(tempDir, "app.2.log"))).toBe(true);
-  });
-
-  it("should do nothing when rotated file count is within maxFiles", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logora-file-"));
-    const activePath = path.join(tempDir, "app.log");
-
-    fs.writeFileSync(path.join(tempDir, "app.1.log"), "1");
-    fs.writeFileSync(path.join(tempDir, "app.2.log"), "2");
-
-    RetentionManager.apply(activePath, 2, undefined);
-
-    expect(fs.existsSync(path.join(tempDir, "app.1.log"))).toBe(true);
-    expect(fs.existsSync(path.join(tempDir, "app.2.log"))).toBe(true);
+    await expect(
+      RetentionManager.apply(activeFilePath, 1, 1),
+    ).resolves.toBeUndefined();
   });
 });

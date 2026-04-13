@@ -1,63 +1,89 @@
-import type { ILogoraWriter, LogEntry } from "logora/module";
+import type { LogEntry } from "logora/module";
 
 import type { FileJsonOutputOptions } from "../../config";
+import type { FileInstruction } from "../../models/file-instruction.interface";
 import { FileSession } from "../file-session";
-import { FileJsonFormatter } from "../formatter/file-json-formatter";
+import { FileInstructionFactory } from "../json/instruction-factory";
+import { FileWritePipeline } from "../pipeline/file-write-pipeline";
+import type { FileWriteRecord } from "../pipeline/file-write-record.interface";
+import type { FileManagedWriter } from "./file-managed-writer.interface";
 
 /**
  * JSON Lines writer implementation for file output.
+ *
+ * The written payloads are intentionally aligned with the structured
+ * instructions emitted by logora-socketio.
  */
-export class FileJsonWriter implements ILogoraWriter {
-  private readonly _session: FileSession;
+export class FileJsonWriter implements FileManagedWriter {
+  private readonly _pipeline: FileWritePipeline;
 
-  private readonly _formatter: FileJsonFormatter;
+  private readonly _factory: FileInstructionFactory;
 
-  constructor(private readonly _options: FileJsonOutputOptions) {
-    this._session = new FileSession(this._options);
-    this._formatter = new FileJsonFormatter();
+  public constructor(private readonly _options: FileJsonOutputOptions) {
+    const session = new FileSession(this._options);
+
+    this._pipeline = new FileWritePipeline(session, this._options);
+    this._factory = new FileInstructionFactory(this._options.serializer);
   }
 
   /**
-   * Writes a structured log entry.
+   * Writes a structured log instruction.
    *
    * @param entry The log entry to write.
    */
   public log(entry: LogEntry): void {
-    this._session.appendLine(this._formatter.formatLog(entry), entry.timestamp);
+    this._pipeline.enqueue(
+      this._createRecord(
+        this._factory.createLogInstruction(entry),
+        entry.timestamp,
+      ),
+    );
   }
 
   /**
-   * Writes a title record.
+   * Writes a structured title instruction.
    *
    * @param title The title to write.
    */
   public title(title: string): void {
     const timestamp: Date = new Date();
 
-    this._session.appendLine(
-      this._formatter.formatTitle(title, timestamp),
-      timestamp,
+    this._pipeline.enqueue(
+      this._createRecord(
+        this._factory.createTitleInstruction(title),
+        timestamp,
+      ),
     );
   }
 
   /**
-   * No-op for JSON outputs.
+   * Writes a structured empty-line instruction.
    *
-   * @param _count Unused.
+   * This intentionally mirrors the Socket.IO JSON contract instead of
+   * becoming a no-op, so both outputs remain strictly aligned.
+   *
+   * @param count The number of empty lines to represent.
    */
-  public empty(_count?: number): void {
-    // No-op for JSON outputs.
+  public empty(count: number = 1): void {
+    const timestamp: Date = new Date();
+
+    this._pipeline.enqueue(
+      this._createRecord(
+        this._factory.createEmptyInstruction(count),
+        timestamp,
+      ),
+    );
   }
 
   /**
    * No-op for file outputs.
    */
   public clear(): void {
-    // No-op for file outputs.
+    // Intentionally a no-op.
   }
 
   /**
-   * Writes a raw record.
+   * Writes a structured print instruction.
    *
    * @param message The raw message.
    * @param args The message arguments.
@@ -65,9 +91,35 @@ export class FileJsonWriter implements ILogoraWriter {
   public print(message: string, ...args: unknown[]): void {
     const timestamp: Date = new Date();
 
-    this._session.appendLine(
-      this._formatter.formatPrint(message, args, timestamp),
-      timestamp,
+    this._pipeline.enqueue(
+      this._createRecord(
+        this._factory.createPrintInstruction(message, args),
+        timestamp,
+      ),
     );
+  }
+
+  /**
+   * Flushes all buffered records.
+   */
+  public flush(): Promise<void> {
+    return this._pipeline.flush();
+  }
+
+  /**
+   * Flushes all buffered records and closes the writer.
+   */
+  public close(): Promise<void> {
+    return this._pipeline.close();
+  }
+
+  private _createRecord(
+    instruction: FileInstruction,
+    timestamp: Date,
+  ): FileWriteRecord {
+    return {
+      content: JSON.stringify(instruction),
+      timestamp,
+    };
   }
 }

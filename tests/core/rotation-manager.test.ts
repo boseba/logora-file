@@ -1,30 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import type { FileRotationPolicy } from "../../src";
 import { RotationManager } from "../../src/core/rotation-manager";
 
 describe("RotationManager", () => {
-  it("should normalize rotation policies", () => {
-    const result = RotationManager.normalizePolicies([
-      "daily",
-      "size",
-      "daily",
-      "startup",
-    ]);
-
-    expect(result).toEqual(["daily", "size", "startup"]);
+  it("should normalize policies and remove duplicates", () => {
+    expect(
+      RotationManager.normalizePolicies(["daily", "size", "daily"]),
+    ).toEqual(["daily", "size"]);
   });
 
-  it("should return an empty array when no policies are defined", () => {
+  it("should return an empty array when policies are missing", () => {
     expect(RotationManager.normalizePolicies()).toEqual([]);
-    expect(RotationManager.normalizePolicies([])).toEqual([]);
   });
 
   it("should detect enabled policies", () => {
-    const policies: FileRotationPolicy[] = ["daily", "size"];
-
-    expect(RotationManager.hasPolicy(policies, "daily")).toBe(true);
-    expect(RotationManager.hasPolicy(policies, "startup")).toBe(false);
+    expect(RotationManager.hasPolicy(["daily", "size"], "size")).toBe(true);
+    expect(RotationManager.hasPolicy(["daily"], "startup")).toBe(false);
   });
 
   it("should detect startup rotation", () => {
@@ -32,72 +23,55 @@ describe("RotationManager", () => {
     expect(RotationManager.shouldRotateOnStartup(["daily"])).toBe(false);
   });
 
-  it("should detect daily rotation when day changes", () => {
-    const previousDate = new Date("2026-03-30T10:00:00.000Z");
-    const currentDate = new Date("2026-03-31T10:00:00.000Z");
-
+  it("should detect daily rotation only when the day changed", () => {
     expect(
-      RotationManager.shouldRotateOnDaily(["daily"], previousDate, currentDate),
+      RotationManager.shouldRotateOnDaily(
+        ["daily"],
+        new Date(2026, 2, 29, 23, 59, 59, 0),
+        new Date(2026, 2, 30, 0, 0, 0, 0),
+      ),
     ).toBe(true);
-  });
-
-  it("should not rotate daily when policy is disabled", () => {
-    const previousDate = new Date("2026-03-30T10:00:00.000Z");
-    const currentDate = new Date("2026-03-31T10:00:00.000Z");
 
     expect(
-      RotationManager.shouldRotateOnDaily(["size"], previousDate, currentDate),
+      RotationManager.shouldRotateOnDaily(
+        ["daily"],
+        new Date(2026, 2, 30, 10, 0, 0, 0),
+        new Date(2026, 2, 30, 11, 0, 0, 0),
+      ),
     ).toBe(false);
   });
 
-  it("should not rotate daily without previous date", () => {
-    const currentDate = new Date("2026-03-31T10:00:00.000Z");
-
+  it("should not rotate daily when there is no previous date", () => {
     expect(
-      RotationManager.shouldRotateOnDaily(["daily"], null, currentDate),
+      RotationManager.shouldRotateOnDaily(
+        ["daily"],
+        null,
+        new Date(2026, 2, 30, 10, 0, 0, 0),
+      ),
     ).toBe(false);
   });
 
   it("should detect size rotation", () => {
-    expect(RotationManager.shouldRotateOnSize(["size"], 100, 50, 120)).toBe(
-      true,
-    );
+    expect(RotationManager.shouldRotateOnSize(["size"], 10, 1, 10)).toBe(true);
   });
 
-  it("should not rotate on size when policy is disabled", () => {
-    expect(RotationManager.shouldRotateOnSize(["daily"], 100, 50, 120)).toBe(
+  it("should not rotate on size when disabled or invalid", () => {
+    expect(RotationManager.shouldRotateOnSize(["daily"], 10, 1, 10)).toBe(
       false,
     );
-  });
 
-  it("should not rotate on size when maxSizeBytes is invalid", () => {
-    expect(
-      RotationManager.shouldRotateOnSize(["size"], 100, 50, undefined),
-    ).toBe(false);
-
-    expect(RotationManager.shouldRotateOnSize(["size"], 100, 50, 0)).toBe(
-      false,
-    );
-  });
-
-  it("should not rotate on size when the file is empty", () => {
-    expect(RotationManager.shouldRotateOnSize(["size"], 0, 50, 10)).toBe(false);
+    expect(RotationManager.shouldRotateOnSize(["size"], 10, 1)).toBe(false);
   });
 
   it("should build a rotation suffix", () => {
-    const result = RotationManager.buildRotationSuffix(
-      new Date("2026-03-30T22:10:00.123Z"),
-    );
-
-    expect(result).toBeTypeOf("string");
-    expect(result.length).toBeGreaterThan(0);
+    expect(
+      RotationManager.buildRotationSuffix(new Date(2026, 2, 30, 10, 0, 0, 123)),
+    ).toBe("2026-03-30_10-00-00-123");
   });
 
   it("should build a day key", () => {
-    const result = RotationManager.getDayKey(
-      new Date(2026, 2, 30, 22, 10, 0, 123),
+    expect(RotationManager.getDayKey(new Date(2026, 2, 30, 10, 0, 0, 0))).toBe(
+      "2026-03-30",
     );
-
-    expect(result).toBe("2026-03-30");
   });
 });

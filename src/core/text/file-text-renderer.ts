@@ -1,14 +1,14 @@
 import dayjs from "dayjs";
+import { LogType } from "logora";
 import type { LogEntry } from "logora/module";
 
-import { LogType } from "logora";
 import type { FileTextOutputOptions } from "../../config";
 import { TemplateEngine } from "../template-engine";
 
 /**
- * Formats log events for text file output.
+ * Renders text lines for file output.
  *
- * This formatter is intentionally aligned with the console output approach:
+ * This renderer is intentionally aligned with the console output approach:
  * - the log type label is derived from the LogType enum
  * - message placeholders are resolved before template rendering
  * - the final line is rendered through the template engine
@@ -16,16 +16,16 @@ import { TemplateEngine } from "../template-engine";
  * Unlike the console formatter, this implementation does not apply colors
  * or visual modifiers, and also supports rendering a daily file header.
  */
-export class FileTextFormatter {
-  constructor(private readonly _options: FileTextOutputOptions) {}
+export class FileTextRenderer {
+  public constructor(private readonly _options: FileTextOutputOptions) {}
 
   /**
-   * Formats a structured log entry into a single text line.
+   * Renders a structured log entry into a single text line.
    *
-   * @param entry The log entry to format.
+   * @param entry The log entry to render.
    * @returns The rendered log line.
    */
-  public formatLog(entry: LogEntry): string {
+  public renderLog(entry: LogEntry): string {
     const formattedTimestamp: string = this.formatTimestamp(entry.timestamp);
     const formattedType: string = this.formatType(entry.type);
     const formattedMessage: string = this.formatMessage(
@@ -46,33 +46,33 @@ export class FileTextFormatter {
   }
 
   /**
-   * Formats a raw printed message.
+   * Renders a raw printed message.
    *
    * @param message The raw message template.
    * @param args The message arguments.
    * @returns The rendered raw message line.
    */
-  public formatPrint(message: string, args: unknown[]): string {
+  public renderPrint(message: string, args: unknown[]): string {
     return this.formatMessage(message, args);
   }
 
   /**
-   * Formats a title line.
+   * Renders a title line.
    *
    * @param title The title value.
    * @returns The rendered title line.
    */
-  public formatTitle(title: string): string {
+  public renderTitle(title: string): string {
     return title;
   }
 
   /**
-   * Formats the daily header line used in text log files.
+   * Renders the daily header line used in text log files.
    *
    * @param date The header date.
    * @returns The rendered daily header line.
    */
-  public formatDailyHeader(date: Date): string {
+  public renderDailyHeader(date: Date): string {
     const formattedDate: string = dayjs(date).format(
       this._options.dailyHeaderDateFormat,
     );
@@ -129,7 +129,7 @@ export class FileTextFormatter {
   }
 
   /**
-   * Converts an arbitrary value to a string suitable for file output.
+   * Converts an arbitrary value to a string suitable for text file output.
    *
    * @param value The value to stringify.
    * @returns A string representation.
@@ -158,6 +158,14 @@ export class FileTextFormatter {
       typeof value === "symbol"
     ) {
       return String(value);
+    }
+
+    if (typeof value === "function") {
+      return value.name || "[anonymous]";
+    }
+
+    if (value instanceof Date) {
+      return value.toISOString();
     }
 
     if (typeof value === "object") {

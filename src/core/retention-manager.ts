@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { PathResolver } from "./path-resolver";
@@ -14,19 +14,19 @@ export class RetentionManager {
    * @param maxFiles Maximum number of rotated files to keep.
    * @param maxAgeDays Maximum age in days for rotated files.
    */
-  public static apply(
+  public static async apply(
     absolutePath: string,
     maxFiles?: number,
     maxAgeDays?: number,
-  ): void {
+  ): Promise<void> {
     const resolved = PathResolver.resolve(absolutePath);
 
-    if (!fs.existsSync(resolved.directoryPath)) {
+    if (!(await this._exists(resolved.directoryPath))) {
       return;
     }
 
-    const rotatedFiles: string[] = fs
-      .readdirSync(resolved.directoryPath)
+    const directoryEntries: string[] = await fs.readdir(resolved.directoryPath);
+    const rotatedFiles: string[] = directoryEntries
       .filter((fileName: string) =>
         PathResolver.isRotatedFileName(absolutePath, fileName),
       )
@@ -36,26 +36,28 @@ export class RetentionManager {
       return;
     }
 
-    const fileStats = rotatedFiles
-      .map((filePath: string) => ({
+    const fileStats = await Promise.all(
+      rotatedFiles.map(async (filePath: string) => ({
         filePath,
-        stats: fs.statSync(filePath),
-      }))
-      .sort(
-        (
-          left: { filePath: string; stats: fs.Stats },
-          right: { filePath: string; stats: fs.Stats },
-        ) => right.stats.mtimeMs - left.stats.mtimeMs,
-      );
+        stats: await fs.stat(filePath),
+      })),
+    );
 
-    this._applyMaxAge(fileStats, maxAgeDays);
-    this._applyMaxFiles(fileStats, maxFiles);
+    fileStats.sort(
+      (
+        left: { filePath: string; stats: { mtimeMs: number } },
+        right: { filePath: string; stats: { mtimeMs: number } },
+      ) => right.stats.mtimeMs - left.stats.mtimeMs,
+    );
+
+    await this._applyMaxAge(fileStats, maxAgeDays);
+    await this._applyMaxFiles(fileStats, maxFiles);
   }
 
-  private static _applyMaxAge(
-    files: Array<{ filePath: string; stats: fs.Stats }>,
+  private static async _applyMaxAge(
+    files: Array<{ filePath: string; stats: { mtimeMs: number } }>,
     maxAgeDays?: number,
-  ): void {
+  ): Promise<void> {
     if (!maxAgeDays || maxAgeDays <= 0) {
       return;
     }
@@ -66,21 +68,30 @@ export class RetentionManager {
     for (const file of files) {
       const ageMs: number = nowMs - file.stats.mtimeMs;
 
-      if (ageMs > maxAgeMs && fs.existsSync(file.filePath)) {
-        fs.unlinkSync(file.filePath);
+      if (ageMs > maxAgeMs && (await this._exists(file.filePath))) {
+        await fs.unlink(file.filePath);
       }
     }
   }
 
-  private static _applyMaxFiles(
-    files: Array<{ filePath: string; stats: fs.Stats }>,
+  private static async _applyMaxFiles(
+    files: Array<{ filePath: string; stats: { mtimeMs: number } }>,
     maxFiles?: number,
-  ): void {
+  ): Promise<void> {
     if (!maxFiles || maxFiles <= 0) {
       return;
     }
 
-    const existingFiles = files.filter((file) => fs.existsSync(file.filePath));
+    const existingFiles: Array<{
+      filePath: string;
+      stats: { mtimeMs: number };
+    }> = [];
+
+    for (const file of files) {
+      if (await this._exists(file.filePath)) {
+        existingFiles.push(file);
+      }
+    }
 
     if (existingFiles.length <= maxFiles) {
       return;
@@ -89,9 +100,24 @@ export class RetentionManager {
     const filesToDelete = existingFiles.slice(maxFiles);
 
     for (const file of filesToDelete) {
-      if (fs.existsSync(file.filePath)) {
-        fs.unlinkSync(file.filePath);
+      if (await this._exists(file.filePath)) {
+        await fs.unlink(file.filePath);
       }
+    }
+  }
+
+  private static async _exists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.stat(targetPath);
+      return true;
+    } catch (error: unknown) {
+      return typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: string }).code !== undefined &&
+        (error as { code?: string }).code !== "EACCES"
+        ? (error as { code?: string }).code !== "ENOENT"
+        : false;
     }
   }
 }

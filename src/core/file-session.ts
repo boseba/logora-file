@@ -1,16 +1,18 @@
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 
 import type { FileOutputOptions } from "../config";
 import type { FileRotationPolicy } from "../enums";
 import { PathResolver } from "./path-resolver";
+import type { FileWriteRecord } from "./pipeline/file-write-record.interface";
+import type { FileWriteSession } from "./pipeline/file-write-session.interface";
 import { RetentionManager } from "./retention-manager";
 import { RotationManager } from "./rotation-manager";
 
 /**
  * Manages the active file lifecycle, including initialization,
- * rotation and retention enforcement.
+ * async append, rotation and retention enforcement.
  */
-export class FileSession {
+export class FileSession implements FileWriteSession {
   private readonly _absolutePath: string;
 
   private readonly _policies: FileRotationPolicy[];
@@ -19,7 +21,9 @@ export class FileSession {
 
   private _lastWriteDate: Date | null = null;
 
-  constructor(private readonly _options: FileOutputOptions) {
+  private _activeFileSize: number = 0;
+
+  public constructor(private readonly _options: FileOutputOptions) {
     this._absolutePath = PathResolver.resolve(this._options.path).absolutePath;
     this._policies = RotationManager.normalizePolicies(this._options.rotation);
 
@@ -33,98 +37,54 @@ export class FileSession {
     }
   }
 
-  /**
-   * Returns the active file absolute path.
-   *
-   * @returns The active file absolute path.
-   */
-  public get absolutePath(): string {
-    return this._absolutePath;
-  }
-
-  /**
-   * Returns the initial day key to use for daily header tracking.
-   *
-   * When appending to an existing file that was already written today,
-   * this prevents writing a duplicate header at startup.
-   *
-   * @param referenceDate The current reference date.
-   * @returns A day key or null.
-   */
-  public getInitialHeaderDayKey(referenceDate: Date): string | null {
-    if (!this._options.append) {
-      return null;
-    }
-
-    if (!fs.existsSync(this._absolutePath)) {
-      return null;
-    }
-
-    const stats: fs.Stats = fs.statSync(this._absolutePath);
-
-    if (stats.size <= 0) {
-      return null;
-    }
-
-    const fileDayKey: string = RotationManager.getDayKey(stats.mtime);
-    const referenceDayKey: string = RotationManager.getDayKey(referenceDate);
-
-    return fileDayKey === referenceDayKey ? fileDayKey : null;
-  }
-
-  /**
-   * Appends a single line to the active file.
-   *
-   * @param content The content to write, without end-of-line.
-   * @param writeDate The associated write date.
-   */
-  public appendLine(content: string, writeDate: Date): void {
-    this._initialize(writeDate);
-
-    const record: string = `${content}${this._options.eol}`;
-    const recordSize: number = Buffer.byteLength(
-      record,
-      this._options.encoding,
-    );
-
-    this._rotateIfNeeded(writeDate, recordSize);
-
-    fs.appendFileSync(this._absolutePath, record, {
-      encoding: this._options.encoding,
-    });
-
-    this._lastWriteDate = writeDate;
-  }
-
-  /**
-   * Appends multiple empty lines to the active file.
-   *
-   * @param count The number of empty lines to append.
-   */
-  public appendEmptyLines(count: number): void {
-    if (count <= 0) {
+  public async appendBatch(records: FileWriteRecord[]): Promise<void> {
+    if (records.length === 0) {
       return;
     }
 
-    const writeDate: Date = new Date();
+    await this._initialize(records[0].timestamp);
 
-    this._initialize(writeDate);
+    let pendingChunks: string[] = [];
+    let pendingBytes: number = 0;
+    let previousWriteDate: Date | null = this._lastWriteDate;
 
-    const content: string = this._options.eol.repeat(count);
+    for (const record of records) {
+      const line: string = `${record.content}${this._options.eol}`;
+      const lineBytes: number = Buffer.byteLength(line, this._options.encoding);
 
-    this._rotateIfNeeded(
-      writeDate,
-      Buffer.byteLength(content, this._options.encoding),
-    );
+      const shouldRotateDaily: boolean = RotationManager.shouldRotateOnDaily(
+        this._policies,
+        previousWriteDate,
+        record.timestamp,
+      );
 
-    fs.appendFileSync(this._absolutePath, content, {
-      encoding: this._options.encoding,
-    });
+      const shouldRotateSize: boolean = RotationManager.shouldRotateOnSize(
+        this._policies,
+        this._activeFileSize + pendingBytes,
+        lineBytes,
+        this._options.maxSizeBytes,
+      );
 
-    this._lastWriteDate = writeDate;
+      if (shouldRotateDaily || shouldRotateSize) {
+        await this._flushPendingChunk(pendingChunks, pendingBytes);
+
+        pendingChunks = [];
+        pendingBytes = 0;
+
+        await this._rotate(record.timestamp);
+        previousWriteDate = this._lastWriteDate;
+      }
+
+      pendingChunks.push(line);
+      pendingBytes += lineBytes;
+      previousWriteDate = record.timestamp;
+    }
+
+    await this._flushPendingChunk(pendingChunks, pendingBytes);
+    this._lastWriteDate = records[records.length - 1].timestamp;
   }
 
-  private _initialize(referenceDate: Date): void {
+  private async _initialize(referenceDate: Date): Promise<void> {
     if (this._initialized) {
       return;
     }
@@ -132,63 +92,63 @@ export class FileSession {
     const resolved = PathResolver.resolve(this._absolutePath);
 
     if (this._options.mkdir) {
-      PathResolver.ensureDirectory(resolved.directoryPath);
+      await fs.mkdir(resolved.directoryPath, { recursive: true });
     }
 
-    const fileExists: boolean = fs.existsSync(this._absolutePath);
+    const fileExists: boolean = await this._exists(this._absolutePath);
 
-    if (
-      fileExists &&
-      RotationManager.shouldRotateOnStartup(this._policies) &&
-      fs.statSync(this._absolutePath).size > 0
-    ) {
-      this._rotate(referenceDate);
-    } else if (fileExists && !this._options.append) {
-      fs.writeFileSync(this._absolutePath, "", {
-        encoding: this._options.encoding,
-      });
-    }
+    if (fileExists) {
+      const stats = await fs.stat(this._absolutePath);
 
-    if (fs.existsSync(this._absolutePath)) {
-      this._lastWriteDate = fs.statSync(this._absolutePath).mtime;
+      if (
+        RotationManager.shouldRotateOnStartup(this._policies) &&
+        stats.size > 0
+      ) {
+        this._activeFileSize = stats.size;
+        this._lastWriteDate = stats.mtime;
+
+        await this._rotate(referenceDate);
+      } else if (!this._options.append) {
+        await fs.writeFile(this._absolutePath, "", {
+          encoding: this._options.encoding,
+        });
+
+        this._activeFileSize = 0;
+        this._lastWriteDate = null;
+      } else {
+        this._activeFileSize = stats.size;
+        this._lastWriteDate = stats.size > 0 ? stats.mtime : null;
+      }
     } else {
-      this._lastWriteDate = referenceDate;
+      this._activeFileSize = 0;
+      this._lastWriteDate = null;
     }
 
     this._initialized = true;
   }
 
-  private _rotateIfNeeded(writeDate: Date, incomingBytes: number): void {
-    const currentFileSize: number = fs.existsSync(this._absolutePath)
-      ? fs.statSync(this._absolutePath).size
-      : 0;
-
-    const shouldRotateDaily: boolean = RotationManager.shouldRotateOnDaily(
-      this._policies,
-      this._lastWriteDate,
-      writeDate,
-    );
-
-    const shouldRotateSize: boolean = RotationManager.shouldRotateOnSize(
-      this._policies,
-      currentFileSize,
-      incomingBytes,
-      this._options.maxSizeBytes,
-    );
-
-    if (shouldRotateDaily || shouldRotateSize) {
-      this._rotate(writeDate);
-    }
-  }
-
-  private _rotate(rotationDate: Date): void {
-    if (!fs.existsSync(this._absolutePath)) {
+  private async _flushPendingChunk(
+    pendingChunks: string[],
+    pendingBytes: number,
+  ): Promise<void> {
+    if (pendingChunks.length === 0) {
       return;
     }
 
-    const stats: fs.Stats = fs.statSync(this._absolutePath);
+    await fs.appendFile(this._absolutePath, pendingChunks.join(""), {
+      encoding: this._options.encoding,
+    });
 
-    if (stats.size <= 0) {
+    this._activeFileSize += pendingBytes;
+  }
+
+  private async _rotate(rotationDate: Date): Promise<void> {
+    if (this._activeFileSize <= 0) {
+      return;
+    }
+
+    if (!(await this._exists(this._absolutePath))) {
+      this._activeFileSize = 0;
       return;
     }
 
@@ -199,7 +159,7 @@ export class FileSession {
     );
     let collisionIndex: number = 1;
 
-    while (fs.existsSync(rotatedPath)) {
+    while (await this._exists(rotatedPath)) {
       rotatedPath = PathResolver.buildRotatedPath(
         this._absolutePath,
         `${suffix}.${collisionIndex}`,
@@ -207,14 +167,37 @@ export class FileSession {
       collisionIndex++;
     }
 
-    fs.renameSync(this._absolutePath, rotatedPath);
+    await fs.rename(this._absolutePath, rotatedPath);
 
-    RetentionManager.apply(
+    await RetentionManager.apply(
       this._absolutePath,
       this._options.maxFiles,
       this._options.maxAgeDays,
     );
 
+    this._activeFileSize = 0;
     this._lastWriteDate = rotationDate;
+  }
+
+  private async _exists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.stat(targetPath);
+      return true;
+    } catch (error: unknown) {
+      if (this._isNotFoundError(error)) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private _isNotFoundError(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "ENOENT"
+    );
   }
 }

@@ -1,29 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { createFileJsonOutput, createFileTextOutput } from "../src";
-import { FileJsonFormatter } from "../src/core/formatter/file-json-formatter";
-import { FileTextFormatter } from "../src/core/formatter/file-text-formatter";
-import { FileJsonOutput, FileTextOutput } from "../src/core/output";
+import { createFileJsonOutput, createFileTextOutput } from "../src/index";
 
-describe("createFileTextOutput", () => {
-  it("should create a FileTextOutput instance", () => {
-    const output = createFileTextOutput();
+describe("index exports", () => {
+  it("should create a text output through the public factory", () => {
+    const output = createFileTextOutput({
+      path: "./logs/app.log",
+    });
 
-    expect(output).toBeInstanceOf(FileTextOutput);
+    expect(output.name).toBe("file-text");
   });
-});
 
-describe("createFileJsonOutput", () => {
-  it("should create a FileJsonOutput instance", () => {
-    const output = createFileJsonOutput();
+  it("should create a JSON output through the public factory", () => {
+    const output = createFileJsonOutput({
+      path: "./logs/app.jsonl",
+    });
 
-    expect(output).toBeInstanceOf(FileJsonOutput);
-  });
-});
-
-describe("core/formatter index", () => {
-  it("should export formatter classes", () => {
-    expect(FileTextFormatter).toBeDefined();
-    expect(FileJsonFormatter).toBeDefined();
+    expect(output.name).toBe("file-json");
   });
 });
